@@ -507,6 +507,7 @@ public class JmsIOTest {
     verify(autoScaler, times(1)).start();
     assertEquals(excpectedTotalBacklogBytes, reader.getTotalBacklogBytes());
     verify(autoScaler, times(1)).getTotalBacklogBytes();
+    reader.getCheckpointMark().finalizeCheckpoint();
     reader.close();
     verify(autoScaler, times(1)).stop();
   }

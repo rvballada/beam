@@ -463,6 +463,7 @@ public class JmsIO {
 
     private T currentMessage;
     private Instant currentTimestamp;
+    private volatile boolean closeRequestDeferred = false;
 
     public UnboundedJmsReader(UnboundedJmsSource<T> source, JmsCheckpointMark checkpointMark) {
       this.source = source;
@@ -512,7 +513,7 @@ public class JmsIO {
       } catch (Exception e) {
         throw new IOException("Error creating JMS consumer", e);
       }
-
+      this.checkpointMark.setReader(this);
       return advance();
     }
 
@@ -575,26 +576,39 @@ public class JmsIO {
 
     @Override
     public void close() throws IOException {
+      checkpointMark.writeLock().lock();
       try {
-        if (consumer != null) {
-          consumer.close();
-          consumer = null;
-        }
-        if (session != null) {
-          session.close();
-          session = null;
-        }
-        if (connection != null) {
-          connection.stop();
-          connection.close();
-          connection = null;
-        }
-        if (autoScaler != null) {
-          autoScaler.stop();
-          autoScaler = null;
+        if (checkpointMark.getUnacknowledgedMessageCount() == 0) {
+          if (consumer != null) {
+            consumer.close();
+            consumer = null;
+          }
+          if (session != null) {
+            session.close();
+            session = null;
+          }
+          if (connection != null) {
+            connection.stop();
+            connection.close();
+            connection = null;
+          }
+          if (autoScaler != null) {
+            autoScaler.stop();
+            autoScaler = null;
+          }
+        } else {
+          closeRequestDeferred = true;
         }
       } catch (Exception e) {
         throw new IOException(e);
+      } finally {
+        checkpointMark.writeLock().unlock();
+      }
+    }
+
+    void closeIfDeferred() throws IOException {
+      if (closeRequestDeferred) {
+        close();
       }
     }
   }

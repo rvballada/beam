@@ -25,7 +25,6 @@ import java.util.Objects;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import javax.jms.Message;
 import org.apache.beam.sdk.io.UnboundedSource;
-import org.checkerframework.checker.nullness.qual.Nullable;
 import org.joda.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,8 +41,25 @@ class JmsCheckpointMark implements UnboundedSource.CheckpointMark, Serializable 
   private transient List<Message> messages = new ArrayList<>();
 
   private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+  private transient JmsIO.UnboundedJmsReader<?> reader;
 
   JmsCheckpointMark() {}
+
+  void setReader(JmsIO.UnboundedJmsReader<?> reader) {
+    this.reader = reader;
+  }
+
+  int getUnacknowledgedMessageCount() {
+    return messages.size();
+  }
+
+  ReentrantReadWriteLock.ReadLock readLock() {
+    return lock.readLock();
+  }
+
+  ReentrantReadWriteLock.WriteLock writeLock() {
+    return lock.writeLock();
+  }
 
   void add(Message message) throws Exception {
     lock.writeLock().lock();
@@ -87,9 +103,10 @@ class JmsCheckpointMark implements UnboundedSource.CheckpointMark, Serializable 
           LOG.error("Exception while finalizing message: ", e);
         }
       }
-      messages.clear();
     } finally {
+      messages.clear();
       lock.writeLock().unlock();
+      closeReader();
     }
   }
 
@@ -100,8 +117,16 @@ class JmsCheckpointMark implements UnboundedSource.CheckpointMark, Serializable 
     messages = new ArrayList<>();
   }
 
+  private void closeReader() {
+    try {
+      reader.closeIfDeferred();
+    } catch (Exception e) {
+      LOG.error("Exception while Closing connection: ", e);
+    }
+  }
+
   @Override
-  public boolean equals(@Nullable Object o) {
+  public boolean equals(Object o) {
     if (this == o) {
       return true;
     }
